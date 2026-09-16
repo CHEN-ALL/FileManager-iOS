@@ -1,0 +1,34 @@
+name: Build IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: 编译 Archive
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project FileManagerApp.xcodeproj \
+            -scheme FileManagerApp \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath build/FileManagerApp.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+      - name: 打包 IPA
+        run: |
+          mkdir -p build/ipa/Payload
+          cp -R build/FileManagerApp.xcarchive/Products/Applications/FileManagerApp.app build/ipa/Payload/
+          cd build/ipa && zip -r ../FileManagerApp.ipa Payload
+      - name: 上传 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileManagerApp-ipa
+          path: build/FileManagerApp.ipa
