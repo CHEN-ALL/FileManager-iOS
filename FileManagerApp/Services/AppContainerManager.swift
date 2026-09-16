@@ -59,7 +59,7 @@ class AppContainerManager: NSObject {
     // MARK: - 方法1: 通过 LSApplicationWorkspace
 
     private func listViaLSApplicationWorkspace() -> [InstalledApp]? {
-        guard let workspace = LSApplicationWorkspace() else {
+        guard let workspace = LSApplicationWorkspace.default() else {
             return nil
         }
 
@@ -251,7 +251,12 @@ class AppContainerManager: NSObject {
 class LSApplicationWorkspace: NSObject {
     private let instance: NSObject
 
-    init?() {
+    private init(instance: NSObject) {
+        self.instance = instance
+        super.init()
+    }
+
+    static func `default`() -> LSApplicationWorkspace? {
         guard let LSApplicationWorkspaceClass = NSClassFromString("LSApplicationWorkspace") else {
             return nil
         }
@@ -271,8 +276,7 @@ class LSApplicationWorkspace: NSObject {
             return nil
         }
 
-        self.instance = obj
-        super.init()
+        return LSApplicationWorkspace(instance: obj)
     }
 
     func allApplications() -> NSArray? {
