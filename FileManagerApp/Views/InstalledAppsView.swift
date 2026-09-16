@@ -172,7 +172,7 @@ struct AppDataContainerView: View {
         .onAppear {
             loadContents()
         }
-        .onChange(of: currentPath) { _, _ in
+        .onChange(of: currentPath) { _ in
             loadContents()
         }
     }

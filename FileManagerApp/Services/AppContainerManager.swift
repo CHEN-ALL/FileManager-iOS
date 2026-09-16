@@ -272,7 +272,7 @@ class LSApplicationWorkspace: NSObject {
         let imp = method_getImplementation(method)
         typealias GetDefaultFunc = @convention(c) (AnyClass, Selector) -> AnyObject?
         let getDefault = unsafeBitCast(imp, to: GetDefaultFunc.self)
-        guard let obj = getDefault(LSApplicationWorkspaceClass, defaultSelector) else {
+        guard let obj = getDefault(LSApplicationWorkspaceClass, defaultSelector) as? NSObject else {
             return nil
         }
 
