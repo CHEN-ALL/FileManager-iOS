@@ -8,6 +8,7 @@
 
 import Foundation
 import UIKit
+import ObjectiveC
 
 // MARK: - 已安装应用模型
 
@@ -42,8 +43,8 @@ class AppContainerManager: NSObject {
     func listInstalledApplications() -> [InstalledApp] {
         var results: [InstalledApp] = []
 
-        // 方法1: 通过 MobileContainerManager 私有框架
-        if let apps = listViaMobileContainerManager() {
+        // 方法1: 通过 LSApplicationWorkspace 获取已安装应用
+        if let apps = listViaLSApplicationWorkspace() {
             results = apps
         }
 
@@ -55,110 +56,73 @@ class AppContainerManager: NSObject {
         return results.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 
-    // MARK: - 方法1: 使用 MobileContainerManager 私有框架
+    // MARK: - 方法1: 通过 LSApplicationWorkspace
 
-    private func listViaMobileContainerManager() -> [InstalledApp]? {
-        // 动态加载 MobileContainerManager
-        guard let mcmBundle = Bundle(path: "/System/Library/PrivateFrameworks/MobileContainerManager.framework") else {
+    private func listViaLSApplicationWorkspace() -> [InstalledApp]? {
+        guard let workspace = LSApplicationWorkspace() else {
             return nil
         }
 
-        do {
-            try mcmBundle.loadAndReturnError()
-        } catch {
-            return nil
-        }
-
-        // 获取 MCMContainer 类
-        guard let MCMContainer = NSClassFromString(@"MCMContainer") as? NSObject.Type else {
-            return nil
-        }
-
-        // 获取 MCMAppDataContainer 类
-        guard let MCMAppDataContainer = NSClassFromString(@"MCMAppDataContainer") else {
-            return nil
-        }
-
-        // 获取 MCMAppInfoContainer 类
-        guard let MCMAppInfoContainer = NSClassFromString(@"MCMAppInfoContainer") else {
+        guard let appsArray = workspace.allApplications() else {
             return nil
         }
 
         var apps: [InstalledApp] = []
 
-        // 尝试从 containermanagerd 获取所有容器
-        // 使用 MCMContainer 的 +allContainers 或类似方法
-        let containerClasses: [AnyClass] = [
-            MCMAppDataContainer,
-            MCMAppInfoContainer
-        ]
-
-        for containerClass in containerClasses {
-            // 尝试调用 +allContainers
-            if containerClass.responds(to: Selector(("allContainers"))) {
-                let _ = unsafeBitCast(containerClass, to: NSObject.Type.self)
-                    .perform(Selector(("allContainers")))
-                // 注意：这里返回的是 NSSet，需要进一步处理
+        for case let appInfo as [String: Any] in appsArray {
+            // 获取 Bundle ID
+            var bundleID: String?
+            if let bid = appInfo["ApplicationIdentifier"] as? String {
+                bundleID = bid
+            } else if let bid = appInfo["CFBundleIdentifier"] as? String {
+                bundleID = bid
             }
-        }
+            guard let bundleID = bundleID else { continue }
 
-        // 备用方案：通过 LSApplicationWorkspace 获取已安装应用
-        if let workspace = LSApplicationWorkspace() {
-            let appsDict = workspace.allApplications() as? [[String: Any]] ?? []
-            for appInfo in appsDict {
-                guard let bundleID = appInfo["ApplicationIdentifier"] as? String ?? appInfo["CFBundleIdentifier"] as? String else {
-                    continue
-                }
+            // 获取 Bundle 路径
+            var bundlePath: String?
+            if let path = appInfo["BundleURL"] as? String {
+                bundlePath = path
+            } else if let url = appInfo["BundleURL"] as? URL {
+                bundlePath = url.path
+            } else if let url = appInfo["BundleURL"] as? NSURL {
+                bundlePath = url.path
+            }
 
-                // 获取应用 Bundle 路径
-                var bundlePath: String?
-                if let path = appInfo["BundleURL"] as? String {
-                    bundlePath = path
-                } else if let url = appInfo["BundleURL"] as? URL {
-                    bundlePath = url.path
-                }
+            // 获取显示名称
+            var displayName = bundleID
+            if let name = appInfo["DisplayName"] as? String {
+                displayName = name
+            } else if let name = appInfo["CFBundleDisplayName"] as? String {
+                displayName = name
+            }
 
-                // 获取显示名称
-                var displayName = bundleID
-                if let name = appInfo["DisplayName"] as? String {
-                    displayName = name
-                } else if let name = appInfo["CFBundleDisplayName"] as? String {
-                    displayName = name
-                }
+            // 获取数据容器
+            let dataURL = getAppDataContainer(bundleID: bundleID)
 
-                // 获取版本
-                var version = "1.0"
-                if let v = appInfo["BundleVersion"] as? String {
-                    version = v
-                } else if let v = appInfo["CFBundleVersion"] as? String {
-                    version = v
-                }
-
-                // 获取数据容器
-                var dataURL: URL?
-                if let dataContainer = getAppDataContainer(bundleID: bundleID) {
-                    dataURL = dataContainer
-                }
-
-                // 获取图标
-                var icon: UIImage?
-                if let bundlePath = bundlePath {
-                    let iconPath = bundlePath.appending("/AppIcon60x60@2x.png")
-                    if FileManager.default.fileExists(atPath: iconPath) {
-                        icon = UIImage(contentsOfFile: iconPath)
+            // 获取图标
+            var icon: UIImage?
+            if let bundlePath = bundlePath {
+                let iconDir = bundlePath + "/"
+                if let iconFiles = try? FileManager.default.contentsOfDirectory(atPath: bundlePath) {
+                    for file in iconFiles {
+                        if file.hasPrefix("AppIcon") && file.hasSuffix(".png") {
+                            icon = UIImage(contentsOfFile: iconDir + file)
+                            break
+                        }
                     }
                 }
+            }
 
-                if let bundlePath = bundlePath {
-                    apps.append(InstalledApp(
-                        id: bundleID,
-                        bundleURL: URL(fileURLWithPath: bundlePath),
-                        dataContainerURL: dataURL,
-                        displayName: displayName,
-                        bundleVersion: version,
-                        icon: icon
-                    ))
-                }
+            if let bundlePath = bundlePath {
+                apps.append(InstalledApp(
+                    id: bundleID,
+                    bundleURL: URL(fileURLWithPath: bundlePath),
+                    dataContainerURL: dataURL,
+                    displayName: displayName,
+                    bundleVersion: "1.0",
+                    icon: icon
+                ))
             }
         }
 
@@ -169,45 +133,39 @@ class AppContainerManager: NSObject {
 
     func getAppDataContainer(bundleID: String) -> URL? {
         // 方法1: 通过 MCMAppDataContainer
-        if let containerClass = NSClassFromString(@"MCMAppDataContainer") {
-            // MCMAppDataContainer *container = [MCMAppDataContainer containerWithIdentifier:bundleID createIfNecessary:NO existed:nil error:nil];
+        if let containerClass = NSClassFromString("MCMAppDataContainer") {
             let createIfNecessary: Bool = false
             var existed: Bool = false
             var error: NSDictionary?
 
-            typealias ContainerCreateFunc = @convention(c) (AnyClass, Selector, String, Bool, UnsafeMutablePointer<Bool>, UnsafeMutablePointer<NSDictionary?>) -> Any?
-            let selector = Selector(("containerWithIdentifier:createIfNecessary:existed:error:"))
+            typealias ContainerCreateFunc = @convention(c) (AnyClass, Selector, String, Bool, UnsafeMutablePointer<Bool>, UnsafeMutablePointer<NSDictionary?>) -> AnyObject?
+            let selector = NSSelectorFromString("containerWithIdentifier:createIfNecessary:existed:error:")
 
             if containerClass.responds(to: selector) {
-                let method = class_getClassMethod(containerClass, selector)!
-                let imp = method_getImplementation(method)
-                let function = unsafeBitCast(imp, to: ContainerCreateFunc.self)
+                if let method = class_getClassMethod(containerClass, selector) {
+                    let imp = method_getImplementation(method)
+                    let function = unsafeBitCast(imp, to: ContainerCreateFunc.self)
 
-                if let container = function(containerClass, selector, bundleID, createIfNecessary, &existed, &error) {
-                    // 获取容器 URL
-                    let urlSelector = Selector(("url"))
-                    if container.responds(to: urlSelector) {
-                        let urlImp = method_getImplementation(class_getInstanceMethod(type(of: container), urlSelector)!)
-                        typealias GetURLFunc = @convention(c) (AnyObject, Selector) -> NSURL
-                        let getURL = unsafeBitCast(urlImp, to: GetURLFunc.self)
-                        let nsurl = getURL(container, urlSelector)
-                        return nsurl as URL
+                    if let container = function(containerClass, selector, bundleID, createIfNecessary, &existed, &error) {
+                        // 获取容器 URL
+                        let urlSelector = NSSelectorFromString("url")
+                        let containerType: AnyObject.Type = type(of: container)
+                        if let urlMethod = class_getInstanceMethod(containerType, urlSelector) {
+                            let urlImp = method_getImplementation(urlMethod)
+                            typealias GetURLFunc = @convention(c) (AnyObject, Selector) -> Unmanaged<NSURL>?
+                            let getURL = unsafeBitCast(urlImp, to: GetURLFunc.self)
+                            if let nsurl = getURL(container, urlSelector)?.takeUnretainedValue() {
+                                return nsurl as URL
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // 方法2: 通过 MobileHouseArrest 方式
-        // 使用 lockdown 的 house_arrest 服务获取 Documents 路径
-        if let documentsPath = getDocumentsPathViaHouseArrest(bundleID: bundleID) {
-            // Documents 的上级就是数据容器
-            return URL(fileURLWithPath: (documentsPath as NSString).deletingLastPathComponent)
-        }
-
-        // 方法3: 直接扫描已知路径
+        // 方法2: 直接扫描已知路径（兜底）
         let containersPath = "/var/mobile/Containers/Data/Application/"
-        do {
-            let containers = try FileManager.default.contentsOfDirectory(atPath: containersPath)
+        if let containers = try? FileManager.default.contentsOfDirectory(atPath: containersPath) {
             for container in containers {
                 let containerURL = URL(fileURLWithPath: containersPath).appendingPathComponent(container)
                 let metadataURL = containerURL.appendingPathComponent(".com.apple.mobile_container_manager.metadata.plist")
@@ -219,27 +177,6 @@ class AppContainerManager: NSObject {
                     }
                 }
             }
-        } catch {
-            // 沙盒可能不允许直接访问
-        }
-
-        return nil
-    }
-
-    // MARK: - 通过 House Arrest 获取 Documents 路径
-
-    private func getDocumentsPathViaHouseArrest(bundleID: String) -> String? {
-        // 使用 MobileContainerManager 的 house_arrest 接口
-        // 这是 iTunes/Finder 访问 App Documents 的正规通道
-        guard let MCMContainer = NSClassFromString(@"MCMAppDataContainer") else {
-            return nil
-        }
-
-        // 尝试通过 container 的 relativePath 属性
-        let selector = Selector(("containerWithIdentifier:createIfNecessary:existed:error:"))
-        if MCMContainer.responds(to: selector) {
-            // 同上，调用方式略
-            // 成功后返回 container 的 url
         }
 
         return nil
@@ -250,7 +187,6 @@ class AppContainerManager: NSObject {
     private func scanBundleDirectory() -> [InstalledApp] {
         var apps: [InstalledApp] = []
 
-        // 扫描 /var/containers/Bundle/Application/
         let bundlePaths = [
             "/var/containers/Bundle/Application/",
             "/private/var/containers/Bundle/Application/"
@@ -263,7 +199,6 @@ class AppContainerManager: NSObject {
 
             for entry in entries {
                 let appDir = basePath + entry
-                // 查找 .app 文件
                 guard let appEntries = try? FileManager.default.contentsOfDirectory(atPath: appDir) else {
                     continue
                 }
@@ -281,10 +216,8 @@ class AppContainerManager: NSObject {
                         let displayName = plist["CFBundleDisplayName"] as? String ?? plist["CFBundleName"] as? String ?? appEntry
                         let version = plist["CFBundleShortVersionString"] as? String ?? "1.0"
 
-                        // 尝试获取数据容器
                         let dataURL = getAppDataContainer(bundleID: bundleID)
 
-                        // 尝试获取图标
                         var icon: UIImage?
                         if let iconFiles = try? FileManager.default.contentsOfDirectory(atPath: appURL.path) {
                             for file in iconFiles {
@@ -319,37 +252,42 @@ class LSApplicationWorkspace: NSObject {
     private let instance: NSObject
 
     init?() {
-        guard let LSApplicationWorkspaceClass = NSClassFromString(@"LSApplicationWorkspace") else {
+        guard let LSApplicationWorkspaceClass = NSClassFromString("LSApplicationWorkspace") else {
             return nil
         }
 
-        let defaultSelector = Selector(("defaultWorkspace"))
+        let defaultSelector = NSSelectorFromString("defaultWorkspace")
         guard LSApplicationWorkspaceClass.responds(to: defaultSelector) else {
             return nil
         }
 
-        let method = class_getClassMethod(LSApplicationWorkspaceClass, defaultSelector)!
+        guard let method = class_getClassMethod(LSApplicationWorkspaceClass, defaultSelector) else {
+            return nil
+        }
         let imp = method_getImplementation(method)
-        typealias GetDefaultFunc = @convention(c) (AnyClass, Selector) -> AnyObject
+        typealias GetDefaultFunc = @convention(c) (AnyClass, Selector) -> AnyObject?
         let getDefault = unsafeBitCast(imp, to: GetDefaultFunc.self)
-        guard let instance = getDefault(LSApplicationWorkspaceClass, defaultSelector) as? NSObject else {
+        guard let obj = getDefault(LSApplicationWorkspaceClass, defaultSelector) else {
             return nil
         }
 
-        self.instance = instance
+        self.instance = obj
         super.init()
     }
 
     func allApplications() -> NSArray? {
-        let selector = Selector(("allApplications"))
+        let selector = NSSelectorFromString("allApplications")
         guard instance.responds(to: selector) else {
             return nil
         }
 
-        let method = class_getMethodDescription(type(of: instance), selector, false, true)
-        let imp = method_getImplementation(class_getInstanceMethod(type(of: instance), selector)!)
-        typealias GetAllAppsFunc = @convention(c) (AnyObject, Selector) -> NSArray
+        let instanceType: AnyClass = type(of: instance)
+        guard let method = class_getInstanceMethod(instanceType, selector) else {
+            return nil
+        }
+        let imp = method_getImplementation(method)
+        typealias GetAllAppsFunc = @convention(c) (AnyObject, Selector) -> Unmanaged<NSArray>?
         let getAllApps = unsafeBitCast(imp, to: GetAllAppsFunc.self)
-        return getAllApps(instance, selector)
+        return getAllApps(instance, selector)?.takeUnretainedValue() as NSArray?
     }
 }
