@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 基本应用标识 -->
+	<key>application-identifier</key>
+	<string>$(AppIdentifierPrefix)$(CFBundleIdentifier)</string>
+
+	<!-- Team ID -->
+	<key>com.apple.developer.team-identifier</key>
+	<string>$(TeamIdentifierPrefix)</string>
+
+	<!-- 关键权限：MobileHouseArrest 信任 -->
+	<!-- 伪装成系统 house_arrest 服务，允许通过 MCM 获取其他 App 容器 -->
+	<key>com.apple.private.mobilehousearrest</key>
+	<true/>
+
+	<!-- 容器管理器权限：跨容器访问 -->
+	<key>com.apple.private.security.container-manager</key>
+	<true/>
+
+	<!-- 平台应用：提升进程权限级别 -->
+	<key>platform-application</key>
+	<true/>
+
+	<!-- 无沙盒：完全脱离沙盒限制 -->
+	<key>com.apple.private.security.no-sandbox</key>
+	<true/>
+
+	<!-- 不需要沙盒容器 -->
+	<key>com.apple.private.security.container-required</key>
+	<false/>
+
+	<!-- 调试权限（用于 JIT 和内存访问） -->
+	<key>get-task-allow</key>
+	<true/>
+
+	<!-- 任务端口许可 -->
+	<key>com.apple.security.get-task-allow</key>
+	<true/>
+
+	<!-- 允许动态代码签名（JIT） -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+	<key>com.apple.security.cs.disable-executable-page-protection</key>
+	<true/>
+
+	<!-- 应用组（可选，用于共享数据） -->
+	<!--
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.selfsigned.filemanager</string>
+	</array>
+	-->
+
+	<!-- 文件保护 -->
+	<key>com.apple.developer.default-data-protection</key>
+	<string>NSFileProtectionCompleteUntilFirstUserAuthentication</string>
+
+	<!-- 钥匙串访问组 -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.selfsigned.filemanager</string>
+	</array>
+</dict>
+</plist>
