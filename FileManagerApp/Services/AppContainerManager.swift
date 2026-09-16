@@ -60,41 +60,58 @@ class AppContainerManager: NSObject {
 
     private func listViaLSApplicationWorkspace() -> [InstalledApp]? {
         guard let workspace = LSApplicationWorkspace.default() else {
+            print("[AppContainer] LSApplicationWorkspace 初始化失败")
             return nil
         }
 
         guard let appsArray = workspace.allApplications() else {
+            print("[AppContainer] allApplications 返回 nil")
             return nil
         }
 
+        print("[AppContainer] 获取到 \(appsArray.count) 个应用")
+
         var apps: [InstalledApp] = []
 
-        for case let appInfo as [String: Any] in appsArray {
-            // 获取 Bundle ID
+        for case let appObj as NSObject in appsArray {
+            // LSApplication 对象，用 KVC 读取属性
             var bundleID: String?
-            if let bid = appInfo["ApplicationIdentifier"] as? String {
-                bundleID = bid
-            } else if let bid = appInfo["CFBundleIdentifier"] as? String {
-                bundleID = bid
+
+            // 尝试 bundleIdentifier
+            if appObj.responds(to: NSSelectorFromString("bundleIdentifier")) {
+                let result = appObj.perform(NSSelectorFromString("bundleIdentifier"))
+                bundleID = result?.takeUnretainedValue() as? String
             }
+
             guard let bundleID = bundleID else { continue }
 
-            // 获取 Bundle 路径
+            // 获取 Bundle URL
             var bundlePath: String?
-            if let path = appInfo["BundleURL"] as? String {
-                bundlePath = path
-            } else if let url = appInfo["BundleURL"] as? URL {
-                bundlePath = url.path
-            } else if let url = appInfo["BundleURL"] as? NSURL {
-                bundlePath = url.path
+            if appObj.responds(to: NSSelectorFromString("bundleURL")) {
+                let result = appObj.perform(NSSelectorFromString("bundleURL"))
+                if let url = result?.takeUnretainedValue() as? URL {
+                    bundlePath = url.path
+                } else if let nsurl = result?.takeUnretainedValue() as? NSURL {
+                    bundlePath = nsurl.path
+                }
             }
 
             // 获取显示名称
             var displayName = bundleID
-            if let name = appInfo["DisplayName"] as? String {
-                displayName = name
-            } else if let name = appInfo["CFBundleDisplayName"] as? String {
-                displayName = name
+            if appObj.responds(to: NSSelectorFromString("localizedName")) {
+                let result = appObj.perform(NSSelectorFromString("localizedName"))
+                if let name = result?.takeUnretainedValue() as? String {
+                    displayName = name
+                }
+            }
+
+            // 获取版本
+            var version = "1.0"
+            if appObj.responds(to: NSSelectorFromString("shortVersionString")) {
+                let result = appObj.perform(NSSelectorFromString("shortVersionString"))
+                if let v = result?.takeUnretainedValue() as? String {
+                    version = v
+                }
             }
 
             // 获取数据容器
@@ -103,11 +120,10 @@ class AppContainerManager: NSObject {
             // 获取图标
             var icon: UIImage?
             if let bundlePath = bundlePath {
-                let iconDir = bundlePath + "/"
                 if let iconFiles = try? FileManager.default.contentsOfDirectory(atPath: bundlePath) {
                     for file in iconFiles {
                         if file.hasPrefix("AppIcon") && file.hasSuffix(".png") {
-                            icon = UIImage(contentsOfFile: iconDir + file)
+                            icon = UIImage(contentsOfFile: bundlePath + "/" + file)
                             break
                         }
                     }
@@ -120,12 +136,13 @@ class AppContainerManager: NSObject {
                     bundleURL: URL(fileURLWithPath: bundlePath),
                     dataContainerURL: dataURL,
                     displayName: displayName,
-                    bundleVersion: "1.0",
+                    bundleVersion: version,
                     icon: icon
                 ))
             }
         }
 
+        print("[AppContainer] 解析出 \(apps.count) 个应用")
         return apps.isEmpty ? nil : apps
     }
 
@@ -194,6 +211,7 @@ class AppContainerManager: NSObject {
 
         for basePath in bundlePaths {
             guard let entries = try? FileManager.default.contentsOfDirectory(atPath: basePath) else {
+                print("[AppContainer] 无法访问 \(basePath)")
                 continue
             }
 
@@ -258,11 +276,13 @@ class LSApplicationWorkspace: NSObject {
 
     static func `default`() -> LSApplicationWorkspace? {
         guard let LSApplicationWorkspaceClass = NSClassFromString("LSApplicationWorkspace") else {
+            print("[LSWorkspace] LSApplicationWorkspace 类不存在")
             return nil
         }
 
         let defaultSelector = NSSelectorFromString("defaultWorkspace")
         guard LSApplicationWorkspaceClass.responds(to: defaultSelector) else {
+            print("[LSWorkspace] defaultWorkspace 方法不存在")
             return nil
         }
 
@@ -273,6 +293,7 @@ class LSApplicationWorkspace: NSObject {
         typealias GetDefaultFunc = @convention(c) (AnyClass, Selector) -> AnyObject?
         let getDefault = unsafeBitCast(imp, to: GetDefaultFunc.self)
         guard let obj = getDefault(LSApplicationWorkspaceClass, defaultSelector) as? NSObject else {
+            print("[LSWorkspace] defaultWorkspace 返回 nil")
             return nil
         }
 
@@ -282,6 +303,7 @@ class LSApplicationWorkspace: NSObject {
     func allApplications() -> NSArray? {
         let selector = NSSelectorFromString("allApplications")
         guard instance.responds(to: selector) else {
+            print("[LSWorkspace] allApplications 方法不存在")
             return nil
         }
 
